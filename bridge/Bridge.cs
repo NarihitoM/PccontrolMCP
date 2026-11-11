@@ -65,12 +65,12 @@ public static class PcBridge
         { "invoke_element", a => Result("invoked", PcUi.Invoke(a.Int("index", 0))) },
         { "focus_element", a => { PcUi.Focus(a.Int("index", 0)); return Done(); } },
         { "set_element_value", a => Result("set", PcUi.SetValue(a.Int("index", 0), a.Str("text"))) },
-        { "move_mouse", a => { PcNative.MoveCursor(a.Int("x", 0), a.Int("y", 0)); return Done(); } },
-        { "click", a => { PcNative.Click(a.Int("x", 0), a.Int("y", 0), a.Str("button"), a.Int("count", 1)); return Done(); } },
-        { "drag", a => { PcNative.Drag(a.Int("x1", 0), a.Int("y1", 0), a.Int("x2", 0), a.Int("y2", 0), a.Int("durationMs", 400)); return Done(); } },
+        { "move_mouse", a => { PcNative.MoveCursor(a.Int("x", 0), a.Int("y", 0), a.Bool("animate", false)); return Done(); } },
+        { "click", a => { PcNative.Click(a.Int("x", 0), a.Int("y", 0), a.Str("button"), a.Int("count", 1), a.Bool("animate", false)); return Done(); } },
+        { "drag", a => { PcNative.Drag(a.Int("x1", 0), a.Int("y1", 0), a.Int("x2", 0), a.Int("y2", 0), a.Int("durationMs", 400), a.Bool("animate", false)); return Done(); } },
         { "scroll", Scroll },
-        { "type_text", a => { PcNative.TypeText(a.Str("text")); return Done(); } },
-        { "press_keys", a => { PcNative.PressKeys(a.Ints("keys"), a.Int("repeat", 1)); return Done(); } },
+        { "type_text", a => { PcNative.TypeText(a.Str("text"), a.Int("delayMs", 0)); return Done(); } },
+        { "press_keys", a => { PcNative.PressKeys(a.Ints("keys"), a.Int("repeat", 1), a.Bool("animate", false)); return Done(); } },
         { "list_windows", PcWindows.List },
         { "focus_window", PcWindows.Focus },
         { "window_action", PcWindows.Act },
@@ -101,8 +101,9 @@ public static class PcBridge
 
     static object Scroll(PcArgs a)
     {
-        if (a.Has("x") && a.Has("y")) PcNative.MoveCursor(a.Int("x", 0), a.Int("y", 0));
-        PcNative.Scroll(a.Int("amount", 0), a.Bool("horizontal", false));
+        bool animate = a.Bool("animate", false);
+        if (a.Has("x") && a.Has("y")) PcNative.MoveCursor(a.Int("x", 0), a.Int("y", 0), animate);
+        PcNative.Scroll(a.Int("amount", 0), a.Bool("horizontal", false), animate);
         return Done();
     }
 

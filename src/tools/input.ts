@@ -7,6 +7,10 @@ import { center, elementLabel, findElement, focusElement, invokeElement } from "
 const MAX_WAIT_MS = 30_000;
 const coordinate = z.number().int().min(-20_000).max(40_000);
 const button = z.enum(["left", "right", "middle"]).default("left");
+const animate = z
+  .boolean()
+  .default(true)
+  .describe("Glide the cursor and type key by key like a person. Set false for instant input.");
 
 export function registerInputTools(server: McpServer): void {
   server.registerTool(
@@ -14,11 +18,11 @@ export function registerInputTools(server: McpServer): void {
     {
       title: "Click",
       description: "Click at x,y screen pixels. Set double for a double-click, button for right/middle click.",
-      inputSchema: { x: coordinate, y: coordinate, button, double: z.boolean().default(false) },
+      inputSchema: { x: coordinate, y: coordinate, button, double: z.boolean().default(false), animate },
     },
-    ({ x, y, button, double }) =>
+    ({ x, y, button, double, animate }) =>
       respond(async () => {
-        await click(x, y, button, double ? 2 : 1);
+        await click(x, y, button, double ? 2 : 1, animate);
         return `${double ? "Double-clicked" : "Clicked"} ${button} at (${x},${y})`;
       }),
   );
@@ -29,17 +33,18 @@ export function registerInputTools(server: McpServer): void {
       title: "Click element",
       description:
         "Click an element by its index from the last get_ui call. A plain left click presses buttons and links directly when possible, otherwise clicks the element's center.",
-      inputSchema: { index: z.number().int().min(0).max(10_000), button, double: z.boolean().default(false) },
+      inputSchema: { index: z.number().int().min(0).max(10_000), button, double: z.boolean().default(false), animate },
     },
-    ({ index, button, double }) =>
+    ({ index, button, double, animate }) =>
       respond(async () => {
         const element = findElement(index);
         const label = elementLabel(element);
-        if (button === "left" && !double && (await invokeElement(index).catch(() => false))) {
-          return `Pressed [${index}] ${label}`;
-        }
         const { x, y } = center(element);
-        await click(x, y, button, double ? 2 : 1);
+        if (button === "left" && !double) {
+          if (animate) await moveMouse(x, y, true);
+          if (await invokeElement(index).catch(() => false)) return `Pressed [${index}] ${label}`;
+        }
+        await click(x, y, button, double ? 2 : 1, animate);
         return `${double ? "Double-clicked" : "Clicked"} [${index}] ${label} at (${x},${y})`;
       }),
   );
@@ -49,11 +54,11 @@ export function registerInputTools(server: McpServer): void {
     {
       title: "Move mouse",
       description: "Move the mouse pointer to x,y screen pixels without clicking (for hover menus and tooltips).",
-      inputSchema: { x: coordinate, y: coordinate },
+      inputSchema: { x: coordinate, y: coordinate, animate },
     },
-    ({ x, y }) =>
+    ({ x, y, animate }) =>
       respond(async () => {
-        await moveMouse(x, y);
+        await moveMouse(x, y, animate);
         return `Moved mouse to (${x},${y})`;
       }),
   );
@@ -69,11 +74,12 @@ export function registerInputTools(server: McpServer): void {
         x2: coordinate,
         y2: coordinate,
         durationMs: z.number().int().min(50).max(5000).default(400),
+        animate,
       },
     },
-    ({ x1, y1, x2, y2, durationMs }) =>
+    ({ x1, y1, x2, y2, durationMs, animate }) =>
       respond(async () => {
-        await drag(x1, y1, x2, y2, durationMs);
+        await drag(x1, y1, x2, y2, durationMs, animate);
         return `Dragged (${x1},${y1}) -> (${x2},${y2})`;
       }),
   );
@@ -88,11 +94,12 @@ export function registerInputTools(server: McpServer): void {
         amount: z.number().int().min(1).max(50).default(3).describe("Wheel notches"),
         x: coordinate.optional(),
         y: coordinate.optional(),
+        animate,
       },
     },
-    ({ direction, amount, x, y }) =>
+    ({ direction, amount, x, y, animate }) =>
       respond(async () => {
-        await scroll(direction, amount, x, y);
+        await scroll(direction, amount, x, y, animate);
         return `Scrolled ${direction} ${amount}`;
       }),
   );
@@ -107,19 +114,20 @@ export function registerInputTools(server: McpServer): void {
         text: z.string().max(10_000),
         index: z.number().int().min(0).max(10_000).optional(),
         clear: z.boolean().default(false),
+        animate,
       },
     },
-    ({ text, index, clear }) =>
+    ({ text, index, clear, animate }) =>
       respond(async () => {
         if (index !== undefined) {
           findElement(index);
           await focusElement(index);
         }
         if (clear) {
-          await pressCombo("ctrl+a", 1);
-          await pressCombo("delete", 1);
+          await pressCombo("ctrl+a", 1, animate);
+          await pressCombo("delete", 1, animate);
         }
-        await typeText(text);
+        await typeText(text, animate);
         return `Typed ${text.length} characters`;
       }),
   );
@@ -133,11 +141,12 @@ export function registerInputTools(server: McpServer): void {
       inputSchema: {
         keys: z.string().min(1).max(100),
         repeat: z.number().int().min(1).max(50).default(1),
+        animate,
       },
     },
-    ({ keys, repeat }) =>
+    ({ keys, repeat, animate }) =>
       respond(async () => {
-        await pressCombo(keys, repeat);
+        await pressCombo(keys, repeat, animate);
         return `Pressed ${keys}${repeat > 1 ? ` x${repeat}` : ""}`;
       }),
   );

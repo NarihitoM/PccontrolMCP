@@ -96,6 +96,11 @@ screenshots and Core Audio for volume. All of it is plain source you can read in
 
 Coordinates are physical screen pixels, the same in `get_ui`, `screenshot` and `click`.
 
+Input looks human by default: the cursor glides along a curved path to its target, typing goes key by key
+with a natural rhythm, scrolling eases in and out smoothly, and shortcuts press and release one key at a
+time. Pass `animate: false` to `click`, `tap_element`, `move_mouse`, `drag`, `scroll`, `type_text` or
+`press_key` for instant input.
+
 ---
 
 ## Tools

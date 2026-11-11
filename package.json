@@ -1,6 +1,6 @@
 {
   "name": "pc-mcp-by-narihito",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "MCP server to control a Windows PC from AI tools: screen, mouse, keyboard, windows, apps and system controls, with one-command setup",
   "type": "module",
   "main": "dist/index.js",

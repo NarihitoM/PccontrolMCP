@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -81,6 +82,16 @@ public static class PcNative
     const ushort VK_RETURN = 0x0D;
     const ushort VK_TAB = 0x09;
     const ushort VK_MENU = 0x12;
+    const int MIN_GLIDE_MS = 120;
+    const int MAX_GLIDE_MS = 700;
+    const int GLIDE_STEP_MS = 8;
+    const int MAX_TYPING_MS = 25000;
+    const int MIN_SCROLL_MS = 200;
+    const int MAX_SCROLL_MS = 1500;
+    const int KEY_STEP_MS = 45;
+    const int KEY_HOLD_MS = 70;
+
+    static readonly Random Jitter = new Random();
 
     static readonly HashSet<ushort> ExtendedKeys = new HashSet<ushort> {
         0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90, 0xA3, 0xA5
@@ -141,74 +152,182 @@ public static class PcNative
         return new int[] { point.X, point.Y };
     }
 
-    public static void MoveCursor(int x, int y)
+    static double EaseInOut(double t)
     {
+        return t < 0.5 ? 2 * t * t : 1 - Math.Pow(-2 * t + 2, 2) / 2;
+    }
+
+    static void Glide(int x, int y)
+    {
+        POINT start;
+        GetCursorPos(out start);
+        double dx = x - start.X;
+        double dy = y - start.Y;
+        double distance = Math.Sqrt(dx * dx + dy * dy);
+        if (distance < 2)
+        {
+            SetCursorPos(x, y);
+            return;
+        }
+
+        int duration = (int)Math.Min(MAX_GLIDE_MS, MIN_GLIDE_MS + distance * 0.35);
+        double bend = Math.Min(60, distance * 0.08) * (Jitter.Next(2) == 0 ? -1 : 1);
+        double normalX = -dy / distance;
+        double normalY = dx / distance;
+        Stopwatch watch = Stopwatch.StartNew();
+
+        while (true)
+        {
+            double t = Math.Min(1.0, watch.ElapsedMilliseconds / (double)duration);
+            double eased = EaseInOut(t);
+            double arc = Math.Sin(Math.PI * eased) * bend;
+            SetCursorPos((int)Math.Round(start.X + dx * eased + normalX * arc), (int)Math.Round(start.Y + dy * eased + normalY * arc));
+            if (t >= 1.0) break;
+            Thread.Sleep(GLIDE_STEP_MS);
+        }
         SetCursorPos(x, y);
     }
 
-    public static void Click(int x, int y, string button, int count)
+    public static void MoveCursor(int x, int y, bool animate)
+    {
+        if (animate) Glide(x, y);
+        else SetCursorPos(x, y);
+    }
+
+    public static void Click(int x, int y, string button, int count, bool animate)
     {
         uint down = 0x0002;
         uint up = 0x0004;
         if (button == "right") { down = 0x0008; up = 0x0010; }
         else if (button == "middle") { down = 0x0020; up = 0x0040; }
 
-        SetCursorPos(x, y);
-        Thread.Sleep(30);
+        MoveCursor(x, y, animate);
+        Thread.Sleep(animate ? 90 : 30);
         for (int i = 0; i < count; i++)
         {
-            Send(new List<INPUT> { Mouse(down, 0), Mouse(up, 0) });
+            Send(new List<INPUT> { Mouse(down, 0) });
+            if (animate) Thread.Sleep(50);
+            Send(new List<INPUT> { Mouse(up, 0) });
             if (i < count - 1) Thread.Sleep(60);
         }
     }
 
-    public static void Drag(int x1, int y1, int x2, int y2, int durationMs)
+    public static void Drag(int x1, int y1, int x2, int y2, int durationMs, bool animate)
     {
         int steps = Math.Max(5, durationMs / 15);
-        SetCursorPos(x1, y1);
-        Thread.Sleep(30);
+        MoveCursor(x1, y1, animate);
+        Thread.Sleep(animate ? 90 : 30);
         Send(new List<INPUT> { Mouse(0x0002, 0) });
         for (int i = 1; i <= steps; i++)
         {
-            SetCursorPos(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps);
+            double t = animate ? EaseInOut((double)i / steps) : (double)i / steps;
+            SetCursorPos((int)Math.Round(x1 + (x2 - x1) * t), (int)Math.Round(y1 + (y2 - y1) * t));
             Thread.Sleep(Math.Max(1, durationMs / steps));
         }
+        if (animate) Thread.Sleep(60);
         Send(new List<INPUT> { Mouse(0x0004, 0) });
     }
 
-    public static void Scroll(int amount, bool horizontal)
+    public static void Scroll(int amount, bool horizontal, bool animate)
     {
-        Send(new List<INPUT> { Mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, unchecked((uint)(amount * WHEEL_DELTA))) });
-    }
-
-    public static void TypeText(string text)
-    {
-        List<INPUT> inputs = new List<INPUT>();
-        foreach (char c in text.Replace("\r\n", "\n"))
+        uint flags = horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
+        if (!animate)
         {
-            if (c == '\n' || c == '\r')
-            {
-                inputs.Add(VirtualKey(VK_RETURN, false));
-                inputs.Add(VirtualKey(VK_RETURN, true));
-            }
-            else if (c == '\t')
-            {
-                inputs.Add(VirtualKey(VK_TAB, false));
-                inputs.Add(VirtualKey(VK_TAB, true));
-            }
-            else
-            {
-                inputs.Add(Key(0, c, KEYEVENTF_UNICODE));
-                inputs.Add(Key(0, c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
-            }
+            Send(new List<INPUT> { Mouse(flags, unchecked((uint)(amount * WHEEL_DELTA))) });
+            return;
         }
-        Send(inputs);
+
+        int total = Math.Abs(amount) * WHEEL_DELTA;
+        int direction = amount < 0 ? -1 : 1;
+        int steps = Math.Min(60, Math.Abs(amount) * 8);
+        int duration = Math.Min(MAX_SCROLL_MS, MIN_SCROLL_MS + Math.Abs(amount) * 90);
+        int sent = 0;
+
+        for (int i = 1; i <= steps; i++)
+        {
+            int target = (int)Math.Round(total * EaseInOut((double)i / steps));
+            int delta = target - sent;
+            if (delta > 0) Send(new List<INPUT> { Mouse(flags, unchecked((uint)(direction * delta))) });
+            sent = target;
+            Thread.Sleep(Math.Max(1, duration / steps));
+        }
     }
 
-    public static void PressKeys(int[] keys, int repeat)
+    static void AppendChar(List<INPUT> inputs, char c)
+    {
+        if (c == '\n' || c == '\r')
+        {
+            inputs.Add(VirtualKey(VK_RETURN, false));
+            inputs.Add(VirtualKey(VK_RETURN, true));
+        }
+        else if (c == '\t')
+        {
+            inputs.Add(VirtualKey(VK_TAB, false));
+            inputs.Add(VirtualKey(VK_TAB, true));
+        }
+        else
+        {
+            inputs.Add(Key(0, c, KEYEVENTF_UNICODE));
+            inputs.Add(Key(0, c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+        }
+    }
+
+    static int KeystrokePause(int delayMs, char c)
+    {
+        double pause = delayMs * (0.6 + Jitter.NextDouble() * 0.8);
+        if (c == ' ' || c == '\n' || c == ',' || c == '.') pause *= 1.8;
+        return (int)Math.Max(1, pause);
+    }
+
+    public static void TypeText(string text, int delayMs)
+    {
+        string normalized = text.Replace("\r\n", "\n");
+        int delay = normalized.Length == 0 ? 0 : Math.Min(delayMs, MAX_TYPING_MS / normalized.Length);
+
+        if (delay < 1)
+        {
+            List<INPUT> inputs = new List<INPUT>();
+            foreach (char c in normalized) AppendChar(inputs, c);
+            Send(inputs);
+            return;
+        }
+
+        for (int i = 0; i < normalized.Length; i++)
+        {
+            List<INPUT> inputs = new List<INPUT>();
+            char c = normalized[i];
+            AppendChar(inputs, c);
+            if (char.IsHighSurrogate(c) && i + 1 < normalized.Length)
+            {
+                i++;
+                AppendChar(inputs, normalized[i]);
+            }
+            Send(inputs);
+            Thread.Sleep(KeystrokePause(delay, c));
+        }
+    }
+
+    public static void PressKeys(int[] keys, int repeat, bool animate)
     {
         for (int r = 0; r < repeat; r++)
         {
+            if (animate)
+            {
+                foreach (int key in keys)
+                {
+                    Send(new List<INPUT> { VirtualKey((ushort)key, false) });
+                    Thread.Sleep(KEY_STEP_MS);
+                }
+                Thread.Sleep(KEY_HOLD_MS);
+                for (int i = keys.Length - 1; i >= 0; i--)
+                {
+                    Send(new List<INPUT> { VirtualKey((ushort)keys[i], true) });
+                    Thread.Sleep(KEY_STEP_MS / 2);
+                }
+                if (r < repeat - 1) Thread.Sleep(120);
+                continue;
+            }
+
             List<INPUT> inputs = new List<INPUT>();
             foreach (int key in keys) inputs.Add(VirtualKey((ushort)key, false));
             for (int i = keys.Length - 1; i >= 0; i--) inputs.Add(VirtualKey((ushort)keys[i], true));
